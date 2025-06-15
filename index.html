@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gioco con Sprite</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+      font-family: 'Courier New', Courier, monospace;
+    }
+    /* fissa il container 16:9 e lo centra */
+    #gameWrapper {
+      width: 1920px;
+      height: 1080px;
+      position: relative;
+      overflow: hidden;
+    }
+    /* schermata iniziale */
+    #startScreen {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: url('start.png') no-repeat center center;
+      background-size: 1920px 1080px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: #fff;
+    }
+    #startScreen h1 {
+      font-weight: lighter;
+      position: absolute;
+      top: 200px;
+      font-size: 50px;
+      margin-bottom: 40px;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.7);
+    }
+    #startScreen button {
+      position: absolute;
+      top: 340px;
+      padding: 20px 40px;
+      font-size: 28px;
+      background: #000;
+      color: #fff;
+      cursor: pointer;
+      border: none;
+    }
+    /* il resto rimane invariato */
+    #gameContainer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: none;
+    }
+    #gameCanvas {
+      width: 100%; height: 100%;
+      background: url('sfondo.png') no-repeat center center;
+      background-size: cover;
+    }
+    #fullOverlay, #overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: none;
+    }
+    #fullOverlay {
+      background: url('overlay.png') no-repeat center center;
+      background-size: cover;
+      z-index: 999;
+    }
+    #overlay {
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: #fff;
+    }
+    #overlay h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+    #overlay button {
+      padding: 15px 30px;
+      font-size: 24px;
+      border: none;
+      border-radius: 8px;
+      background: #555;
+      color: #fff;
+      cursor: pointer;
+    }
+    #hud {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 1000;
+    }
+    #hudScore {
+      position: absolute; top:10px; left:10px;
+      font-size: 20px; color:#fff;
+      text-shadow:1px 1px 4px rgba(0,0,0,0.7);
+    }
+    #hudTeleport {
+      position: absolute; top:-30px; right:20px;
+      width:120px; height:120px;
+      background: url('teletrasporto.png') no-repeat center center;
+      background-size: contain;
+      opacity:1;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameWrapper">
+
+    <!-- SCHERMATA INIZIALE -->
+    <div id="startScreen">
+      <h1>Indossa la maschera e sali sul mio palco.</h1>
+      <button id="startButton">Start</button>
+    </div>
+
+    <!-- GIOCO -->
+    <div id="gameContainer">
+      <canvas id="gameCanvas" width="1920" height="1080"></canvas>
+      <div id="fullOverlay"></div>
+      <div id="overlay">
+        <h1 id="overlayMessage">Dio ti ha preso</h1>
+        <button id="restartButton">Riprova</button>
+      </div>
+      <div id="hud">
+        <div id="hudScore">Pagine raccolte: 0/5</div>
+        <div id="hudTeleport"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- AUDIO -->
+  <audio id="music"        src="musica boss fight-1.mp3" loop></audio>
+  <audio id="soundPoint"   src="carta.mp3"></audio>
+  <audio id="soundBullet"  src="luce-1.mp3"></audio>
+  <audio id="soundTeleport"src="teletrasporto.mp3"></audio>
+  <audio id="soundDeath"   src="perso.mp3"></audio>
+
+  <script>
+    // Riferimenti DOM
+    const startScreen    = document.getElementById('startScreen');
+    const startButton    = document.getElementById('startButton');
+    const gameContainer  = document.getElementById('gameContainer');
+    const restartButton  = document.getElementById('restartButton');
+    const overlay        = document.getElementById('overlay');
+    const fullOverlay    = document.getElementById('fullOverlay');
+    const hudScore       = document.getElementById('hudScore');
+    const hudTeleport    = document.getElementById('hudTeleport');
+    const music          = document.getElementById('music');
+    const soundPoint     = document.getElementById('soundPoint');
+    const soundBullet    = document.getElementById('soundBullet');
+    const soundTeleport  = document.getElementById('soundTeleport');
+    const soundDeath     = document.getElementById('soundDeath');
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx    = canvas.getContext('2d');
+
+    // Volumi
+    music.volume       = 0.2;
+    soundPoint.volume  = 0.3;
+    soundBullet.volume = 0.02;
+    soundDeath.volume  = 0.1;
+
+    // Sprite
+    const playerImg = new Image(), pointImg = new Image();
+    playerImg.src = 'giocatore.png';
+    pointImg.src  = 'pagine.png';
+
+    let keys = {}, player, bullet, circle, collected;
+    let gameState = 'start';
+    let mousePos = { x:0, y:0 };
+    const TELEPORT_RADIUS = 300;
+    let teleported = false;
+
+    startButton.addEventListener('click', startGame);
+    restartButton.addEventListener('click', () => {
+      if (gameState === 'win') {
+        window.location.href = 'pagina-di-vittoria.html';
+      } else {
+        startGame();
+      }
+    });
+
+    // Input
+    window.addEventListener('keydown', e=> keys[e.key]=true);
+    window.addEventListener('keyup',   e=> keys[e.key]=false);
+    window.addEventListener('mousemove', e=>{
+      const r = canvas.getBoundingClientRect();
+      mousePos.x = e.clientX - r.left;
+      mousePos.y = e.clientY - r.top;
+    });
+    window.addEventListener('mousedown', e=>{
+      if(e.button===0 && gameState==='playing' && !teleported){
+        const {x:tx,y:ty}=getTeleportEnd();
+        player.x=tx; player.y=ty;
+        teleported=true;
+        hudTeleport.style.opacity='0.2';
+        soundTeleport.play();
+      }
+    });
+
+    function startGame(){
+      startScreen.style.display='none';
+      gameContainer.style.display='block';
+      overlay.style.display='none';
+      fullOverlay.style.display='block';
+      hudScore.textContent='Pagine raccolte: 0/5';
+      hudTeleport.style.opacity='1.0';
+      if(music.paused) music.play();
+      // inizializza player con angolo 0
+      player = { x:960, y:540, size:110, speed:6, angle:0 };
+      collected=0;
+      teleported=false;
+      circle=null;
+      spawnCircle();
+      spawnBullet();
+      gameState='playing';
+      requestAnimationFrame(gameLoop);
+    }
+
+    function spawnCircle(){
+      const margin=400;
+      let x,y,prev=circle&&{x:circle.x,y:circle.y};
+      do{
+        x=Math.random()*(1920-2*margin)+margin;
+        y=Math.random()*(1080-60)+30;
+      }while(prev && distance({x,y},prev)<400);
+      circle={x,y,size:170};
+    }
+
+    function spawnBullet(){
+      let x,y;
+      do{
+        const e=Math.floor(Math.random()*4);
+        x=e%2===0?(e===0?0:1920):Math.random()*1920;
+        y=e%2===1?(e===1?0:1080):Math.random()*1080;
+      }while(distance({x,y},player)<700);
+      const speed=8+collected*9.2;
+      const a=Math.atan2(player.y-y,player.x-x);
+      bullet={x,y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,size:20};
+      soundBullet.play();
+    }
+
+    function update(){
+      if(gameState!=='playing')return;
+
+      // movimento
+      let movingHoriz = 0;
+      if(keys['ArrowUp']||keys['w'])    player.y-=player.speed;
+      if(keys['ArrowDown']||keys['s'])  player.y+=player.speed;
+      if(keys['ArrowLeft']||keys['a'])  { player.x-=player.speed; movingHoriz = -1; }
+      if(keys['ArrowRight']||keys['d']) { player.x+=player.speed; movingHoriz = +1; }
+
+      // confini
+      player.x=Math.max(player.size/2,Math.min(1920-player.size/2,player.x));
+      player.y=Math.max(player.size/2,Math.min(1080-player.size/2,player.y));
+
+      // aggiorno angolo (lerp verso target)
+      const maxA = Math.PI/16;       // 11°
+      const targetA = movingHoriz * -maxA;  // senso opposto al movimento
+      player.angle += (targetA - player.angle) * 0.1;
+
+      // bullet e collisioni...
+      if(bullet){
+        bullet.x+=bullet.vx; bullet.y+=bullet.vy;
+        if(bullet.x<-bullet.size||bullet.x>1920+bullet.size||bullet.y<-bullet.size||bullet.y>1080+bullet.size)
+          spawnBullet();
+        if(distance(player,bullet)<player.size*1.2){
+          soundDeath.play();
+          endGame('gameover');
+        }
+      }
+      if(distance(player,circle)<player.size){
+        collected++;
+        hudScore.textContent=`Pagine raccolte: ${collected}/5`;
+        soundPoint.play();
+        if(collected>=5) endGame('win');
+        else { spawnCircle(); spawnBullet(); }
+      }
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,1920,1080);
+
+      // teleport line + circle (invariato)...
+      if(!teleported && gameState==='playing'){
+        const { x:tx, y:ty } = getTeleportEnd();
+        const grad = ctx.createLinearGradient(tx,ty,player.x,player.y);
+        grad.addColorStop(0,'rgba(255,255,255,1)');
+        grad.addColorStop(1,'rgba(255,255,255,0)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(player.x,player.y);
+        ctx.lineTo(tx,ty);
+        ctx.stroke();
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(tx, ty, 10, 0, 2*Math.PI);
+        ctx.stroke();
+      }
+
+      // cerchio verde
+      ctx.drawImage(pointImg,
+        circle.x-circle.size/2,
+        circle.y-circle.size/2,
+        circle.size, circle.size
+      );
+
+      // proiettile (invariato)...
+      if (bullet) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'soft-light';
+                ctx.globalAlpha = 0.6;
+                ctx.filter = 'blur(15px)';
+                const bw = bullet.size / 0.07;
+                const tw = bw / 1.5;
+                const cx = bullet.x;
+                const topY = 0, bottomY = bullet.y;
+                ctx.fillStyle = 'rgba(255,255,255,0.05)';
+                ctx.beginPath();
+                ctx.moveTo(cx - tw/2 - 30, topY);
+                ctx.lineTo(cx + tw/2 - 30, topY);
+                ctx.lineTo(cx + bw/2, bottomY);
+                ctx.lineTo(cx - bw/2, bottomY);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillStyle = '#ede6ac';
+                ctx.beginPath();
+                ctx.ellipse(bullet.x, bullet.y, bullet.size/0.15, bullet.size/0.3, 0, 0, Math.PI*2);
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.restore();
+                ctx.filter = 'none';
+            }
+
+      // giocatore con rotazione
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(player.angle);
+      ctx.drawImage(
+        playerImg,
+        -player.size/2, -player.size/2,
+        player.size, player.size
+      );
+      ctx.restore();
+    }
+
+    function gameLoop(){ update(); draw(); if(gameState==='playing') requestAnimationFrame(gameLoop); }
+
+    function endGame(st){
+      fullOverlay.style.display='none';
+      gameState=st;
+      overlay.querySelector('h1').textContent = st==='win' ? 'Hai vinto!' : 'Dio ti ha preso';
+      if(st==='win') restartButton.textContent='Cancella Dio';
+      else           restartButton.textContent='Riprova';
+      overlay.style.display='flex';
+    }
+
+    function getTeleportEnd(){
+      const dx=mousePos.x-player.x, dy=mousePos.y-player.y;
+      const d=Math.hypot(dx,dy);
+      if(d<=TELEPORT_RADIUS) return { x:mousePos.x, y:mousePos.y };
+      const f=TELEPORT_RADIUS/d;
+      return { x:player.x+dx*f, y:player.y+dy*f };
+    }
+
+    function distance(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  </script>
+</body>
+</html>

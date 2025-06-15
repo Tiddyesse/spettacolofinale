@@ -249,7 +249,7 @@
         x=e%2===0?(e===0?0:1920):Math.random()*1920;
         y=e%2===1?(e===1?0:1080):Math.random()*1080;
       }while(distance({x,y},player)<700);
-      const speed=8+collected*9.2;
+      const speed=7+collected*9;
       const a=Math.atan2(player.y-y,player.x-x);
       bullet={x,y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,size:20};
       soundBullet.play();
